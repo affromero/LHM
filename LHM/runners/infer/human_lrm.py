@@ -18,8 +18,13 @@ from omegaconf import OmegaConf
 from PIL import Image
 from tqdm.auto import tqdm
 
-from engine.pose_estimation.pose_estimator import PoseEstimator
-from engine.SegmentAPI.base import Bbox
+# splattie: PoseEstimator pulls mmpose/mmcv at import. Imported lazily in
+# __init__ so the canonical body avatar (infer_mesh, neutral betas) runs without
+# the heavy pose-estimation stack. See backend/vendor/LHM patch notes.
+try:
+    from engine.SegmentAPI.base import Bbox
+except Exception:  # noqa: BLE001
+    Bbox = None
 
 # from LHM.utils.model_download_utils import AutoModelQuery
 from LHM.utils.model_download_utils import AutoModelQuery
@@ -367,17 +372,31 @@ class HumanLRMInferrer(Inferrer):
         # if do not download prior model, we automatically download them.
         prior_check()
 
-        self.facedetect = FaceDetector(
-            "./pretrained_models/gagatracker/vgghead/vgg_heads_l.trcd",
-            device=avaliable_device(),
-        )
-        self.pose_estimator = PoseEstimator(
-            "./pretrained_models/human_model_files/", device=avaliable_device()
-        )
+        # splattie: face detect + pose estimation are optional. The canonical body
+        # avatar (infer_mesh) only needs neutral betas + the model forward, so we
+        # don't require mmpose/sam2. They stay None when unavailable; crop_face_image
+        # and parsing() already fall back (head=zeros, rembg mask).
+        try:
+            self.facedetect = FaceDetector(
+                "./pretrained_models/gagatracker/vgghead/vgg_heads_l.trcd",
+                device=avaliable_device(),
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"\033[33m[splattie] face detector unavailable ({e}); head input -> zeros\033[0m")
+            self.facedetect = None
+        try:
+            from engine.pose_estimation.pose_estimator import PoseEstimator
+
+            self.pose_estimator = PoseEstimator(
+                "./pretrained_models/human_model_files/", device=avaliable_device()
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"\033[33m[splattie] pose estimation unavailable ({e}); use neutral betas\033[0m")
+            self.pose_estimator = None
         try:
             self.parsingnet = SAM2Seg()
-        except:
-            self.parsingnet = None 
+        except Exception:  # noqa: BLE001
+            self.parsingnet = None
 
         self.model: ModelHumanLRM = self._build_model(self.cfg).to(self.device)
 
@@ -503,6 +522,12 @@ class HumanLRMInferrer(Inferrer):
 
     @torch.no_grad()
     def parsing(self, img_path):
+        # splattie: rembg fallback when SAM2 parsing is unavailable.
+        if self.parsingnet is None:
+            from rembg import remove
+
+            rgba = np.array(remove(Image.open(img_path).convert("RGB")).convert("RGBA"))
+            return rgba[:, :, 3].astype(np.uint8)
 
         parsing_out = self.parsingnet(img_path=img_path, bbox=None)
 
