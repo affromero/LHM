@@ -10,10 +10,18 @@ import omegaconf
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from diff_gaussian_rasterization import (
-    GaussianRasterizationSettings,
-    GaussianRasterizer,
-)
+try:
+    from diff_gaussian_rasterization import (
+        GaussianRasterizationSettings,
+        GaussianRasterizer,
+    )
+except ImportError:
+    # splattie: the rasterizer is used only by the image/video render path. The
+    # canonical body export is forward -> animation_infer_gs -> save_ply, which never
+    # rasterizes, so we don't install diff_gaussian_rasterization. If server-side
+    # rendering is added later, wire it through gsplat (as the LAM renderer does).
+    GaussianRasterizationSettings = None
+    GaussianRasterizer = None
 from plyfile import PlyData, PlyElement
 from pytorch3d.transforms import matrix_to_quaternion
 from pytorch3d.transforms.rotation_conversions import quaternion_multiply
