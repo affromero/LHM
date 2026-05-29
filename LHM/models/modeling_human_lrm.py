@@ -18,7 +18,10 @@ from accelerate.logging import get_logger
 from diffusers.utils import is_torch_version
 
 from LHM.models.arcface_utils import ResNetArcFace
-from LHM.models.ESRGANer_utils import ESRGANEasyModel
+
+# splattie: ESRGANEasyModel pulls basicsr (heavy SR framework) at import. It only
+# super-resolves the head crop; imported lazily + made optional so the canonical
+# body avatar (head fed as zeros) runs without basicsr. See faceESRGAN below.
 from LHM.models.rendering.gs_renderer import GS3DRenderer, PointEmbed
 from LHM.models.rendering.gsplat_renderer import GSPlatRenderer
 
@@ -157,8 +160,17 @@ class ModelHumanLRM(nn.Module):
         if self.use_face_id:
             self.id_face_net = ResNetArcFace()
 
+        self.faceESRGAN = None
         if self.facesr:
-            self.faceESRGAN = ESRGANEasyModel()
+            # splattie: optional — basicsr only loads if available. Missing it
+            # (lightest body path, head fed as zeros) -> faceESRGAN stays None and
+            # obtain_facesr returns the head unchanged.
+            try:
+                from LHM.models.ESRGANer_utils import ESRGANEasyModel
+
+                self.faceESRGAN = ESRGANEasyModel()
+            except Exception as e:  # noqa: BLE001
+                print(f"\033[33m[splattie] face SR (basicsr) unavailable ({e}); head SR skipped\033[0m")
         if self.use_stylegan2_prior:
             self.stylegan2_prior = EasyStyleGAN_series_model()  # harm PSNR.
 
@@ -572,6 +584,9 @@ class ModelHumanLRMSapdinoBodyHeadSD3_5(ModelHumanLRM):
         )
 
     def obtain_facesr(self, head_image):
+        if self.faceESRGAN is None:  # splattie: no basicsr -> use head as-is
+            return head_image
+
         def tensor_to_image(head_image):
             head_image = head_image.permute(0, 2, 3, 1)
             head_image_numpy = head_image.detach().cpu().numpy()
