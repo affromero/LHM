@@ -31,6 +31,10 @@ class SMPLXOutput(BaseOutput):
     is_full_body: bool
     ratio: float
     msg: str
+    # Full SMPL-X pose as axis-angle [53, 3]: global_orient(1) + body(21) +
+    # lhand(15) + rhand(15) + jaw(1). Splattie bakes the body pose so the avatar's
+    # arms rest as photographed (instead of the discarded-pose T-pose default).
+    full_pose: np.ndarray = None
 
 
 def normalize_rgb_tensor(img, imgenet_normalization=True):
@@ -181,4 +185,5 @@ class PoseEstimator:
             is_full_body=is_full_body,
             ratio=visible_ratio.cpu().item(),
             msg="success" if is_full_body else "no full-body human detected",
+            full_pose=target_human[0]["rotvec"].cpu().numpy(),
         )

@@ -6,6 +6,7 @@
 # @Function      : Inference code for human_lrm model
 
 import argparse
+import json
 import os
 import pdb
 import time
@@ -538,10 +539,18 @@ class HumanLRMInferrer(Inferrer):
     def infer_mesh(
         self,
         image_path: str,
-        dump_tmp_dir: str,  
+        dump_tmp_dir: str,
         dump_mesh_dir: str,
         shape_param=None,
+        pose_rotvec=None,
     ):
+        """Export a gaussian PLY for the person in `image_path`.
+
+        With `pose_rotvec` (SMPL-X axis-angle [53, 3] from the pose estimator) the
+        body is baked into the *photographed* pose — arms rest where the photo shows
+        them — and a sibling `<stem>_joints.json` holds the matching posed 55-joint
+        skeleton. Without it, the legacy canonical (A-pose) body is exported.
+        """
 
         source_size = self.cfg.source_size
         aspect_standard = 5.0 / 3
@@ -628,12 +637,53 @@ class HumanLRMInferrer(Inferrer):
         )
         smplx_params['transform_mat_neutral_pose'] = transform_mat_neutral_pose
 
+        # Bake the photographed body pose (canonical gaussians are predicted above
+        # regardless; here we choose the pose they're skinned into). The root/global
+        # orient is zeroed so the avatar stays upright and faces the camera — only the
+        # articulated body + hands + jaw come from the photo, putting the arms at rest.
+        if pose_rotvec is not None:
+            rv = torch.as_tensor(pose_rotvec, dtype=dtype, device=device).reshape(-1, 3)  # [53, 3]
+            smplx_params['root_pose'] = torch.zeros(1, 1, 3, device=device)
+            smplx_params['body_pose'] = rv[1:22].reshape(1, 1, 21, 3)
+            smplx_params['jaw_pose'] = rv[52:53].reshape(1, 1, 3)
+            smplx_params['lhand_pose'] = rv[22:37].reshape(1, 1, 15, 3)
+            smplx_params['rhand_pose'] = rv[37:52].reshape(1, 1, 15, 3)
+
         output_gs = self.model.animation_infer_gs(gs_app_model_list, query_points, smplx_params)
 
-        output_gs_path = '_'.join(os.path.basename(image_path).split('.')[:-1])+'.ply'
+        stem = '_'.join(os.path.basename(image_path).split('.')[:-1])
+        output_gs_path = stem + '.ply'
 
         print(f"save mesh to {os.path.join(dump_mesh_dir, output_gs_path)}")
         output_gs.save_ply(os.path.join(dump_mesh_dir, output_gs_path))
+
+        # Posed skeleton (same frame as the baked gaussians) for the widget's rig.
+        if pose_rotvec is not None:
+            posed_joints = self._posed_joints(smplx_params, shape_param.to(device), transform_mat_neutral_pose, device)
+            with open(os.path.join(dump_mesh_dir, stem + '_joints.json'), 'w') as f:
+                json.dump(posed_joints.tolist(), f)
+
+    def _posed_joints(self, smplx_params, shape_param, transform_mat_neutral_pose, device):
+        """Posed 55-joint SMPL-X skeleton [55, 3] matching the baked-pose gaussians.
+
+        Reuses the model's own FK (`get_transform_mat_joint`) on the same posed
+        `smplx_params`, so the joints live in the identical frame as the exported PLY.
+        """
+        smplx_model = self.model.renderer.smplx_model
+        joint_zero_pose = smplx_model.get_zero_pose_human(
+            shape_param=shape_param, device=device, face_offset=None, joint_offset=None
+        )  # [1, 55, 3]
+        single = {
+            'root_pose': smplx_params['root_pose'][:, 0],
+            'body_pose': smplx_params['body_pose'][:, 0],
+            'jaw_pose': smplx_params['jaw_pose'][:, 0],
+            'leye_pose': smplx_params['leye_pose'][:, 0],
+            'reye_pose': smplx_params['reye_pose'][:, 0],
+            'lhand_pose': smplx_params['lhand_pose'][:, 0],
+            'rhand_pose': smplx_params['rhand_pose'][:, 0],
+        }
+        _, posed_joints = smplx_model.get_transform_mat_joint(transform_mat_neutral_pose, joint_zero_pose, single)
+        return posed_joints[0].detach().cpu().numpy()  # [55, 3]
 
 
     def infer_single(
