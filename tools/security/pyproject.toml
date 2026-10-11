@@ -2,4 +2,12 @@
 name = "lhm-security-cpu-check"
 version = "0.0.0"
 requires-python = ">=3.11,<3.12"
-dependencies = ["omegaconf==2.3.0", "pytest==8.4.2", "ruff==0.16.5"]
+dependencies = ["omegaconf==2.3.0", "pytest==8.4.2", "ruff==0.16.5", "torch==2.14.1", "numpy==1.26.4"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu", marker = "sys_platform == 'linux'" }

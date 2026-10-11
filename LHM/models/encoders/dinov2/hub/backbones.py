@@ -55,7 +55,7 @@ def _make_dinov2_model(
     if pretrained:
         model_full_name = _make_dinov2_model_name(arch_name, patch_size, num_register_tokens)
         url = _DINOV2_BASE_URL + f"/{model_base_name}/{model_full_name}_pretrain.pth"
-        state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu")
+        state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu", weights_only=True)
         # ********** Modified by Zexin He in 2023-2024 **********
         state_dict = {k: v for k, v in state_dict.items() if 'mask_token' not in k}  # DDP concern
         if vit_kwargs.get("modulation_dim") is not None:
