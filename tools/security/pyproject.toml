@@ -1,0 +1,5 @@
+[project]
+name = "lhm-security-cpu-check"
+version = "0.0.0"
+requires-python = ">=3.11,<3.12"
+dependencies = ["omegaconf==2.3.0", "pytest==8.4.2", "ruff==0.16.5"]

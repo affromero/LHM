@@ -1,0 +1,23 @@
+name: Pinned local model CPU regressions
+on:
+  push:
+    branches: [security/pinned-local-model, splattie]
+  pull_request:
+    branches: [splattie]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  configuration:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+      - run: uv sync --project tools/security --python 3.11.15 --frozen
+      - name: Verify canonical configuration and local snapshot selection
+        env:
+          PYTHONPATH: .
+        run: uv run --project tools/security --no-sync pytest tests/security -q
+      - run: uv run --project tools/security --no-sync ruff check LHM/utils/inference_config.py tests/security --select E9,F63,F7,F82

@@ -5,7 +5,6 @@
 # @Time          : 2025-03-1 17:30:37
 # @Function      : Inference code for human_lrm model
 
-import argparse
 import json
 import os
 import pdb
@@ -15,7 +14,6 @@ import cv2
 import numpy as np
 import torch
 from accelerate.logging import get_logger
-from omegaconf import OmegaConf
 from PIL import Image
 from tqdm.auto import tqdm
 
@@ -26,9 +24,6 @@ try:
     from engine.SegmentAPI.base import Bbox
 except Exception:  # noqa: BLE001
     Bbox = None
-
-# from LHM.utils.model_download_utils import AutoModelQuery
-from LHM.utils.model_download_utils import AutoModelQuery
 
 try:
     from engine.SegmentAPI.SAM import SAM2Seg
@@ -56,8 +51,9 @@ from LHM.utils.face_detector import FaceDetector
 # from LHM.utils.video import images_to_video
 from LHM.utils.ffmpeg_utils import images_to_video
 from LHM.utils.hf_hub import wrap_model_hub
+from LHM.utils.inference_config import parse_inference_configs
 from LHM.utils.logging import configure_logger
-from LHM.utils.model_card import MODEL_CARD, MODEL_CONFIG
+from LHM.utils.model_card import MODEL_CARD
 
 
 def download_geo_files():
@@ -134,26 +130,6 @@ def get_bbox(mask):
     # scale box to 1.05
     scale_box = box.scale(1.1, width=width, height=height)
     return scale_box
-
-def query_model_name(model_name):
-    if model_name in MODEL_PATH:
-        model_path = MODEL_PATH[model_name]
-        if not os.path.exists(model_path):
-            model_url = MODEL_CARD[model_name]
-            download_extract_tar_from_url(model_url, './')
-    else:
-        model_path = model_name
-    
-    return model_path
-
-
-def query_model_config(model_name):
-    try:
-        model_params = model_name.split('-')[1]
-        
-        return MODEL_CONFIG[model_params] 
-    except:
-        return None
 
 def infer_preprocess_image(
     rgb_path,
@@ -282,76 +258,8 @@ def infer_preprocess_image(
 
 
 def parse_configs():
-
-
     download_geo_files()
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--infer", type=str)
-    args, unknown = parser.parse_known_args()
-
-    cfg = OmegaConf.create()
-    cli_cfg = OmegaConf.from_cli(unknown)
-
-    if "export_mesh" not in cli_cfg: 
-        cli_cfg.export_mesh = None
-    if "export_video" not in cli_cfg: 
-        cli_cfg.export_video= None
-
-    query_model = AutoModelQuery()
-
-    # parse from ENV
-    if os.environ.get("APP_INFER") is not None:
-        args.infer = os.environ.get("APP_INFER")
-    if os.environ.get("APP_MODEL_NAME") is not None:
-        model_name = query_model_name(os.environ.get("APP_MODEL_NAME"))
-        cli_cfg.model_name = os.environ.get("APP_MODEL_NAME")
-    else:
-        model_name = cli_cfg.model_name
-        model_path= query_model.query(model_name) 
-        cli_cfg.model_name = model_path 
-    
-    model_config = query_model_config(model_name)
-
-    if model_config is not None:
-        cfg_train = OmegaConf.load(model_config)
-        cfg.source_size = cfg_train.dataset.source_image_res
-        try:
-            cfg.src_head_size = cfg_train.dataset.src_head_size
-        except:
-            cfg.src_head_size = 112
-        cfg.render_size = cfg_train.dataset.render_image.high
-        _relative_path = os.path.join(
-            cfg_train.experiment.parent,
-            cfg_train.experiment.child,
-            os.path.basename(cli_cfg.model_name).split("_")[-1],
-        )
-
-        cfg.save_tmp_dump = os.path.join("exps", "save_tmp", _relative_path)
-        cfg.image_dump = os.path.join("exps", "images", _relative_path)
-        cfg.video_dump = os.path.join("exps", "videos", _relative_path)  # output path
-        cfg.mesh_dump = os.path.join("exps", "meshs", _relative_path)  # output path
-
-    if args.infer is not None:
-        cfg_infer = OmegaConf.load(args.infer)
-        cfg.merge_with(cfg_infer)
-        cfg.setdefault(
-            "save_tmp_dump", os.path.join("exps", cli_cfg.model_name, "save_tmp")
-        )
-        cfg.setdefault("image_dump", os.path.join("exps", cli_cfg.model_name, "images"))
-        cfg.setdefault(
-            "video_dump", os.path.join("dumps", cli_cfg.model_name, "videos")
-        )
-        cfg.setdefault("mesh_dump", os.path.join("dumps", cli_cfg.model_name, "meshes"))
-
-    cfg.motion_video_read_fps = 6
-    cfg.merge_with(cli_cfg)
-
-    cfg.setdefault("logger", "INFO")
-
-    assert cfg.model_name is not None, "model_name is required"
-
-    return cfg, cfg_train
+    return parse_inference_configs()
 
 
 @REGISTRY_RUNNERS.register("infer.human_lrm")
