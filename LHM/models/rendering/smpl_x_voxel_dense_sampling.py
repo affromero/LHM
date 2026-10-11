@@ -719,6 +719,7 @@ class SMPLXVoxelMeshModel(nn.Module):
             voxel_flat = torch.load(
                 os.path.join(f"pretrained_models/voxel_grid/voxel_{voxel_size}.pth"),
                 map_location=avaliable_device(),
+                weights_only=True,
             )
         else:
             voxel_flat = self.voxel_smooth_register(
